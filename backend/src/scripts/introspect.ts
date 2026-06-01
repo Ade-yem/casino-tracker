@@ -1,81 +1,57 @@
 /**
- * Schema verification utility. Run with: npx ts-node src/scripts/introspect.ts
+ * Schema verification utility. Run with:
+ *   cd backend && npx ts-node src/scripts/introspect.ts
  *
- * Confirms the real field names on the BetSwirl subgraph before we trust the
- * data layer, and discovers the Store address. Requires GRAPH_API_KEY in .env.
+ * Confirms actual entity names, field names, and discovers Bank/Store address.
+ * Requires GRAPH_API_KEY in backend/.env.
  */
-import { gql, listStores } from '../api/graph';
-
-interface TypeRef {
-  name: string | null;
-  kind: string;
-  ofType: TypeRef | null;
-}
+import { rawGql, introspectQueryType, fetchAllBets } from '../api/graph';
 
 interface FieldInfo {
   name: string;
-  type: TypeRef;
+  type: { name: string | null; kind: string; ofType: { name: string | null } | null };
 }
+interface TypeInfo { name: string; kind: string; fields: FieldInfo[] | null }
 
-interface TypeInfo {
-  name: string;
-  kind: string;
-  fields: FieldInfo[] | null;
-}
-
-function typeName(t: TypeRef | null): string {
+function typeName(t: FieldInfo['type'] | null): string {
   if (!t) return '';
-  if (t.name) return t.name;
-  return typeName(t.ofType);
+  return t.name ?? typeName(t.ofType as FieldInfo['type']) ?? '';
 }
 
 async function main() {
-  const introspection = await gql<{ __schema: { types: TypeInfo[] } }>(`
+  console.log('=== Top-level query fields ===');
+  const fields = await introspectQueryType();
+  console.log(fields.join(', '));
+
+  console.log('\n=== Schema for key entities ===');
+  const targets = ['Bet', 'GameToken', 'GameTokenDayData', 'Token', 'Casino', 'Bank', 'Store'];
+  const schema = await rawGql<{ __schema: { types: TypeInfo[] } }>(`
     {
       __schema {
         types {
-          name
-          kind
-          fields { name type { name kind ofType { name kind ofType { name kind } } } }
+          name kind
+          fields { name type { name kind ofType { name kind } } }
         }
       }
     }
   `);
-
-  const targets = [
-    'Store',
-    'GameTokenDayData',
-    'DiceBet',
-    'CoinTossBet',
-    'RouletteBet',
-    'KenoBet',
-    'RussianRouletteBet',
-    'GameToken',
-    'Token',
-  ];
-
   for (const target of targets) {
-    const t = introspection.__schema.types.find((x) => x.name === target);
-    if (!t) {
-      console.log(`\n### ${target}: NOT FOUND in schema`);
-      continue;
-    }
-    console.log(`\n### ${target} (${t.kind})`);
+    const t = schema.__schema.types.find(x => x.name === target);
+    if (!t) { console.log(`\n### ${target}: NOT IN SCHEMA`); continue; }
+    console.log(`\n### ${target}`);
     for (const f of t.fields ?? []) {
-      console.log(`  - ${f.name}: ${typeName(f.type)}`);
+      console.log(`  ${f.name}: ${typeName(f.type)}`);
     }
   }
 
-  console.log('\n### Stores (discover CASINO_STORE_ADDRESS):');
-  const stores = await listStores();
-  for (const s of stores) {
-    console.log(
-      `  - id=${s.id} bets=${s.totalBetAmount} payouts=${s.totalPayoutAmount} count=${s.totalBetCount}`
-    );
+  console.log('\n=== Sample bets (last 24h) ===');
+  const now = Math.floor(Date.now() / 1000);
+  const bets = await fetchAllBets(now - 86400, now);
+  console.log(`Fetched ${bets.length} resolved bets in the last 24 hours`);
+  if (bets.length > 0) {
+    const b = bets[0];
+    console.log('First bet:', JSON.stringify(b, null, 2));
   }
 }
 
-main().catch((err) => {
-  console.error('Introspection failed:', err.message);
-  process.exit(1);
-});
+main().catch(err => { console.error('Introspection failed:', err.message); process.exit(1); });

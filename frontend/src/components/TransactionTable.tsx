@@ -6,8 +6,14 @@ interface Props {
   bets: Bet[];
 }
 
-type StatusFilter = 'All' | 'Win' | 'Lose' | 'Pending';
+type StatusFilter = 'All' | 'Win' | 'Loss' | 'Refunded';
 const PAGE_SIZE = 25;
+
+function betStatus(b: Bet): string {
+  if (b.refunded) return 'Refunded';
+  if (!b.resolved) return 'Pending';
+  return b.payout_usd > b.amount_usd ? 'Win' : b.payout_usd > 0 ? 'Partial' : 'Loss';
+}
 
 export default function TransactionTable({ bets }: Props) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
@@ -21,7 +27,9 @@ export default function TransactionTable({ bets }: Props) {
 
   const filtered = useMemo(() => {
     let rows = bets;
-    if (statusFilter !== 'All') rows = rows.filter((b) => b.status === statusFilter);
+    if (statusFilter === 'Win') rows = rows.filter((b) => b.payout_usd > b.amount_usd);
+    else if (statusFilter === 'Loss') rows = rows.filter((b) => b.resolved && !b.refunded && b.payout_usd <= b.amount_usd);
+    else if (statusFilter === 'Refunded') rows = rows.filter((b) => b.refunded);
     if (gameFilter !== 'All') rows = rows.filter((b) => b.game_type === gameFilter);
     return [...rows].sort((a, b) => b.amount_usd - a.amount_usd);
   }, [bets, statusFilter, gameFilter]);
@@ -30,13 +38,16 @@ export default function TransactionTable({ bets }: Props) {
   const safePage = Math.min(page, pageCount - 1);
   const rows = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
-  const statusBadge = (s: Bet['status']) => {
+  const statusBadge = (b: Bet) => {
+    const s = betStatus(b);
     const cls =
       s === 'Win'
         ? 'bg-green-100 text-green-700'
-        : s === 'Lose'
+        : s === 'Loss'
           ? 'bg-red-100 text-red-700'
-          : 'bg-amber-100 text-amber-700';
+          : s === 'Refunded'
+            ? 'bg-slate-100 text-slate-600'
+            : 'bg-amber-100 text-amber-700';
     return <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`}>{s}</span>;
   };
 
@@ -48,29 +59,19 @@ export default function TransactionTable({ bets }: Props) {
           <select
             className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as StatusFilter);
-              setPage(0);
-            }}
+            onChange={(e) => { setStatusFilter(e.target.value as StatusFilter); setPage(0); }}
           >
-            {(['All', 'Win', 'Lose', 'Pending'] as StatusFilter[]).map((s) => (
-              <option key={s} value={s}>
-                {s === 'All' ? 'All statuses' : s}
-              </option>
+            {(['All', 'Win', 'Loss', 'Refunded'] as StatusFilter[]).map((s) => (
+              <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
             ))}
           </select>
           <select
             className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             value={gameFilter}
-            onChange={(e) => {
-              setGameFilter(e.target.value);
-              setPage(0);
-            }}
+            onChange={(e) => { setGameFilter(e.target.value); setPage(0); }}
           >
             {gameTypes.map((g) => (
-              <option key={g} value={g}>
-                {g === 'All' ? 'All games' : g}
-              </option>
+              <option key={g} value={g}>{g === 'All' ? 'All games' : g}</option>
             ))}
           </select>
         </div>
@@ -85,7 +86,7 @@ export default function TransactionTable({ bets }: Props) {
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                 <tr>
                   <th className="py-2 pr-4">Date</th>
-                  <th className="py-2 pr-4">Tx Hash</th>
+                  <th className="py-2 pr-4">Roll Tx</th>
                   <th className="py-2 pr-4">Game</th>
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4">Token</th>
@@ -114,7 +115,7 @@ export default function TransactionTable({ bets }: Props) {
                       )}
                     </td>
                     <td className="py-2 pr-4">{b.game_type}</td>
-                    <td className="py-2 pr-4">{statusBadge(b.status)}</td>
+                    <td className="py-2 pr-4">{statusBadge(b)}</td>
                     <td className="py-2 pr-4">{b.token}</td>
                     <td className="py-2 pr-4 text-right font-medium">
                       {formatUsd(b.amount_usd, true)}

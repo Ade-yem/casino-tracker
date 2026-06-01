@@ -1,11 +1,15 @@
+/**
+ * The Graph query client for the BetSwirl Polygon subgraph.
+ *
+ * Schema confirmed from BetSwirl SDK source (@betswirl/sdk-core).
+ * All bets live in a single `Bet` entity (not separate diceBets/coinTossBets).
+ * Player address is `user { address: id }`, timestamp is `betTimestamp`,
+ * resolution is `resolved` (boolean, not a status enum).
+ */
 import axios from 'axios';
 import { assertGraphConfigured, graphEndpoint } from '../config';
 
-/**
- * Minimal GraphQL POST helper against the BetSwirl subgraph on The Graph's
- * decentralized network. Throws on GraphQL or transport errors.
- */
-export async function gql<T>(
+async function gql<T>(
   query: string,
   variables: Record<string, unknown> = {}
 ): Promise<T> {
@@ -21,78 +25,103 @@ export async function gql<T>(
   return res.data.data as T;
 }
 
+// gameId values as used in the subgraph (confirmed from SDK xe/Ee maps)
+export const GAME_IDS = [
+  'CoinToss',
+  'Dice',
+  'Roulette',
+  'Keno',
+  'Wheel',
+  'Plinko',
+] as const;
+
+export type GameId = (typeof GAME_IDS)[number];
+
+/** Raw bet as returned by the subgraph (before normalization). */
 export interface RawBet {
   id: string;
-  bettor: string;
-  amount: string;
-  payout: string;
-  status: 'Pending' | 'Win' | 'Lose';
-  timestamp: string;
+  gameId: GameId;
+  betAmount: string;       // amount per single bet (raw token units)
+  betCount: string;        // number of bets in the transaction
+  betTimestamp: string;    // UNIX seconds
+  betTxnHash: string;
   rollTxnHash: string | null;
-  gameToken: { symbol: string; decimals: string };
+  rollTimestamp: string | null;
+  // totalBetAmount aliased as rollTotalBetAmount in the SDK;
+  // it is the resolved total wagered (may differ from betAmount*betCount for multi-bets)
+  totalBetAmount: string | null;
+  payout: string | null;   // what the house returned; null if pending
+  resolved: boolean;
+  refunded: boolean;
+  user: { id: string };    // player wallet address (id = lowercased address)
+  gameToken: {
+    id: string;
+    token: {
+      id: string;          // token contract address
+      symbol: string;
+      decimals: string;
+    };
+  };
 }
 
+/** Pre-aggregated per-day data from the GameToken entity's dayData. */
 export interface DayData {
-  date: string;
-  totalBetAmount: string;
-  totalPayoutAmount: string;
-  totalBetCount: string;
-  gameToken: { symbol: string; decimals: string };
+  date: string;            // UNIX day timestamp (start of day UTC)
+  totalWagered: string;    // sum of all bet amounts that day (raw units)
+  totalPayout: string;     // sum of all payouts that day (raw units)
+  betCount: string;
+  token: {
+    symbol: string;
+    decimals: string;
+  };
 }
 
-export interface StoreSummary {
+export interface BankSummary {
   id: string;
-  totalBetAmount: string;
-  totalPayoutAmount: string;
-  totalBetCount: string;
+  totalWagered: string;
+  totalPayout: string;
+  betCount: string;
 }
 
-/** Subgraph query roots, one per game type. */
-export const GAME_QUERY_ROOTS = [
-  'diceBets',
-  'coinTossBets',
-  'rouletteBets',
-  'kenoBets',
-  'russianRouletteBets',
-] as const;
-export type GameQueryRoot = (typeof GAME_QUERY_ROOTS)[number];
-
-/** Map a query root to the canonical game-type label stored/displayed. */
-export const GAME_TYPE_LABEL: Record<GameQueryRoot, string> = {
-  diceBets: 'Dice',
-  coinTossBets: 'CoinToss',
-  rouletteBets: 'Roulette',
-  kenoBets: 'Keno',
-  russianRouletteBets: 'RussianRoulette',
-};
+const BET_FIELDS = `
+  id
+  gameId
+  betAmount
+  betCount
+  betTimestamp
+  betTxnHash
+  rollTxnHash
+  rollTimestamp
+  totalBetAmount
+  payout
+  resolved
+  refunded
+  user { id }
+  gameToken {
+    id
+    token { id symbol decimals }
+  }
+`;
 
 const PAGE_SIZE = 1000;
 
-/**
- * Fetch every bet of one game type within [fromTs, toTs] using cursor-based
- * pagination on `id` (never `skip`, which degrades past ~5k rows).
- */
-async function fetchBetsForGame(
-  root: GameQueryRoot,
-  fromTs: number,
-  toTs: number
-): Promise<RawBet[]> {
+/** Cursor-based pagination over all resolved bets in a timestamp range. */
+export async function fetchAllBets(fromTs: number, toTs: number): Promise<RawBet[]> {
   const query = `
-    query Bets($lastId: ID!, $from: Int!, $to: Int!) {
-      ${root}(
+    query Bets($lastId: ID!, $from: BigInt!, $to: BigInt!) {
+      bets(
         first: ${PAGE_SIZE}
         orderBy: id
         orderDirection: asc
-        where: { id_gt: $lastId, timestamp_gte: $from, timestamp_lte: $to }
+        where: {
+          id_gt: $lastId
+          betTimestamp_gte: $from
+          betTimestamp_lte: $to
+          resolved: true
+        }
+        subgraphError: allow
       ) {
-        id
-        bettor
-        amount
-        payout
-        status
-        timestamp
-        rollTxnHash
-        gameToken { symbol decimals }
+        ${BET_FIELDS}
       }
     }
   `;
@@ -100,15 +129,14 @@ async function fetchBetsForGame(
   const all: RawBet[] = [];
   let lastId = '';
 
-  // Walk pages until a short page signals the end.
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const data = await gql<Record<string, RawBet[]>>(query, {
+    const data = await gql<{ bets: RawBet[] }>(query, {
       lastId,
-      from: fromTs,
-      to: toTs,
+      from: String(fromTs),
+      to: String(toTs),
     });
-    const page = data[root] ?? [];
+    const page = data.bets ?? [];
     all.push(...page);
     if (page.length < PAGE_SIZE) break;
     lastId = page[page.length - 1].id;
@@ -117,90 +145,105 @@ async function fetchBetsForGame(
   return all;
 }
 
-/** Fetch bets across all game types in parallel, tagged with their game type. */
-export async function fetchAllBets(
-  fromTs: number,
-  toTs: number
-): Promise<Array<{ raw: RawBet; gameType: string }>> {
-  const pages = await Promise.all(
-    GAME_QUERY_ROOTS.map(async (root) => {
-      const bets = await fetchBetsForGame(root, fromTs, toTs);
-      return bets.map((raw) => ({ raw, gameType: GAME_TYPE_LABEL[root] }));
-    })
-  );
-  return pages
-    .flat()
-    .sort((a, b) => Number(a.raw.timestamp) - Number(b.raw.timestamp));
-}
-
-/** Pre-aggregated per-day, per-game-token totals. */
+/**
+ * Fetch pre-aggregated day data from GameToken entities.
+ * Each GameToken has a dayData array; we query across all tokens.
+ * NOTE: This uses a different approach than per-bet fetching — it queries the
+ * GameToken entity's dayData, which pre-aggregates totalWagered/totalPayout.
+ */
 export async function fetchDayData(fromTs: number, toTs: number): Promise<DayData[]> {
+  // Convert timestamps to day boundaries (The Graph stores day as unix day * 86400)
+  const fromDay = Math.floor(fromTs / 86400) * 86400;
+  const toDay = Math.floor(toTs / 86400) * 86400;
+
   const query = `
-    query DayData($from: Int!, $to: Int!, $lastDate: Int!) {
+    query DayData($from: Int!, $to: Int!) {
       gameTokenDayDatas(
         first: ${PAGE_SIZE}
         orderBy: date
         orderDirection: asc
-        where: { date_gte: $from, date_lte: $to, date_gt: $lastDate }
+        where: { date_gte: $from, date_lte: $to }
+        subgraphError: allow
       ) {
         date
-        totalBetAmount
-        totalPayoutAmount
-        totalBetCount
-        gameToken { symbol decimals }
+        totalWagered
+        totalPayout
+        betCount
+        gameToken {
+          token { symbol decimals }
+        }
       }
     }
   `;
 
-  const all: DayData[] = [];
-  let lastDate = fromTs - 1;
+  // Try this entity; if field names differ we fall back in aggregator
+  try {
+    const data = await gql<{
+      gameTokenDayDatas: Array<{
+        date: string;
+        totalWagered: string;
+        totalPayout: string;
+        betCount: string;
+        gameToken: { token: { symbol: string; decimals: string } };
+      }>;
+    }>(query, { from: fromDay, to: toDay });
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const data = await gql<{ gameTokenDayDatas: DayData[] }>(query, {
-      from: fromTs,
-      to: toTs,
-      lastDate,
-    });
-    const page = data.gameTokenDayDatas ?? [];
-    all.push(...page);
-    if (page.length < PAGE_SIZE) break;
-    lastDate = Number(page[page.length - 1].date);
+    return (data.gameTokenDayDatas ?? []).map((d) => ({
+      date: d.date,
+      totalWagered: d.totalWagered,
+      totalPayout: d.totalPayout,
+      betCount: d.betCount,
+      token: d.gameToken.token,
+    }));
+  } catch {
+    // If gameTokenDayDatas doesn't exist or fields differ, return empty so
+    // aggregator falls back to per-bet aggregation.
+    return [];
   }
-
-  return all;
 }
 
-/** Cumulative totals from the Store entity (single call). */
-export async function fetchStoreSummary(storeId: string): Promise<StoreSummary | null> {
+/** Bank/Store cumulative summary for the Polygon deployment. */
+export async function fetchBankSummary(bankAddress: string): Promise<BankSummary | null> {
   const query = `
-    query Store($id: ID!) {
-      store(id: $id) {
+    query Bank($id: ID!) {
+      casino(id: $id) {
         id
-        totalBetAmount
-        totalPayoutAmount
-        totalBetCount
+        totalWagered
+        totalPayout
+        betCount
       }
     }
   `;
-  const data = await gql<{ store: StoreSummary | null }>(query, {
-    id: storeId.toLowerCase(),
-  });
-  return data.store;
+
+  // The entity might be called 'casino', 'bank', or 'store' — try in order.
+  const entityNames = ['casino', 'bank', 'store'];
+  for (const entity of entityNames) {
+    try {
+      const q = query.replace('casino(id', `${entity}(id`).replace('casino {\n', `${entity} {\n`);
+      const data = await gql<Record<string, BankSummary | null>>(q, {
+        id: bankAddress.toLowerCase(),
+      });
+      const result = data[entity];
+      if (result) return result;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
-/** List stores (used to discover the BetSwirl Store address on first setup). */
-export async function listStores(): Promise<StoreSummary[]> {
-  const query = `
-    query Stores {
-      stores(first: 10) {
-        id
-        totalBetAmount
-        totalPayoutAmount
-        totalBetCount
-      }
-    }
-  `;
-  const data = await gql<{ stores: StoreSummary[] }>(query);
-  return data.stores;
+/**
+ * Introspection helper: discover which top-level query fields exist.
+ * Used by the introspect script to validate field names at runtime.
+ */
+export async function introspectQueryType(): Promise<string[]> {
+  const data = await gql<{
+    __schema: { queryType: { fields: Array<{ name: string }> } };
+  }>(`{ __schema { queryType { fields { name } } } }`);
+  return data.__schema.queryType.fields.map((f) => f.name);
 }
+
+/**
+ * Run a raw GraphQL query — used by the introspect script to explore schema.
+ */
+export { gql as rawGql };

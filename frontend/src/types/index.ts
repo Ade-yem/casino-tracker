@@ -4,10 +4,12 @@ export interface Bet {
   amount_usd: number;
   payout_usd: number;
   token: string;
-  game_type: string;
-  status: 'Pending' | 'Win' | 'Lose';
+  game_type: string;       // 'Dice' | 'CoinToss' | 'Roulette' | 'Keno' | 'Wheel' | 'Plinko'
+  resolved: boolean;
+  refunded: boolean;
+  bet_tx_hash: string;
   roll_tx_hash: string | null;
-  timestamp: number;
+  timestamp: number;       // UNIX seconds
 }
 
 export interface SummaryMetrics {

@@ -3,46 +3,61 @@ import { getDb } from '../db/client';
 
 export interface NormalizedBet {
   id: string;
-  bettor: string;
-  amount_usd: number;
-  payout_usd: number;
-  token: string;
-  game_type: string;
-  status: 'Pending' | 'Win' | 'Lose';
+  bettor: string;          // player wallet address
+  amount_usd: number;      // total wagered (betAmount * betCount), human-readable
+  payout_usd: number;      // house outflow, human-readable (0 if lost)
+  token: string;           // e.g. 'USDC'
+  game_type: string;       // e.g. 'Dice', 'CoinToss'
+  resolved: boolean;
+  refunded: boolean;
+  bet_tx_hash: string;
   roll_tx_hash: string | null;
-  timestamp: number;
+  timestamp: number;       // betTimestamp (UNIX seconds)
 }
 
-/** Convert a raw subgraph bet into display/storage units. */
-export function normalizeBet(raw: RawBet, gameType: string): NormalizedBet {
-  const decimals = Number(raw.gameToken.decimals);
+/**
+ * Convert a raw subgraph Bet into our normalized format.
+ *
+ * Amount: the total wagered per bet transaction = betAmount * betCount.
+ * If totalBetAmount is present (set after roll resolution) we prefer it
+ * because it's the authoritative on-chain value for multi-bet sessions.
+ */
+export function normalizeBet(raw: RawBet): NormalizedBet {
+  const decimals = Number(raw.gameToken.token.decimals);
   const divisor = 10 ** decimals;
+
+  // betAmount is per single roll; multiply by betCount for the full wager.
+  const totalWagered = raw.totalBetAmount
+    ? Number(raw.totalBetAmount) / divisor
+    : (Number(raw.betAmount) * Number(raw.betCount)) / divisor;
+
+  const payout = raw.payout ? Number(raw.payout) / divisor : 0;
+
   return {
     id: raw.id,
-    bettor: raw.bettor,
-    amount_usd: Number(raw.amount) / divisor,
-    payout_usd: Number(raw.payout) / divisor,
-    token: raw.gameToken.symbol,
-    game_type: gameType,
-    status: raw.status,
+    bettor: raw.user.id,
+    amount_usd: totalWagered,
+    payout_usd: payout,
+    token: raw.gameToken.token.symbol,
+    game_type: raw.gameId,
+    resolved: raw.resolved,
+    refunded: raw.refunded,
+    bet_tx_hash: raw.betTxnHash,
     roll_tx_hash: raw.rollTxnHash,
-    timestamp: Number(raw.timestamp),
+    timestamp: Number(raw.betTimestamp),
   };
 }
 
-/** Fetch + normalize bets across all game types for a time range. */
+/** Fetch + normalize all resolved bets for a time range. */
 export async function getNormalizedBets(
   fromTs: number,
   toTs: number
 ): Promise<NormalizedBet[]> {
-  const tagged = await fetchAllBets(fromTs, toTs);
-  return tagged.map(({ raw, gameType }) => normalizeBet(raw, gameType));
+  const raw = await fetchAllBets(fromTs, toTs);
+  return raw.map(normalizeBet);
 }
 
-/**
- * Optional write-through cache: persist normalized bets to SQLite so repeated
- * requests don't re-hit The Graph. INSERT OR REPLACE keyed on the bet id.
- */
+/** Write-through cache: upsert normalized bets into SQLite. */
 export function cacheBets(bets: NormalizedBet[]): void {
   if (bets.length === 0) return;
   const db = getDb();
@@ -62,7 +77,7 @@ export function cacheBets(bets: NormalizedBet[]): void {
         payout_usd: b.payout_usd,
         token: b.token,
         game_type: b.game_type,
-        status: b.status,
+        status: b.refunded ? 'Refunded' : b.resolved ? 'Resolved' : 'Pending',
         roll_tx_hash: b.roll_tx_hash,
         timestamp: b.timestamp,
       });
@@ -76,7 +91,6 @@ export function cacheBets(bets: NormalizedBet[]): void {
   ).run(maxTs, Math.floor(Date.now() / 1000));
 }
 
-/** Clear the local cache (used by POST /api/refresh). */
 export function clearCache(): void {
   const db = getDb();
   db.prepare('DELETE FROM bets').run();
