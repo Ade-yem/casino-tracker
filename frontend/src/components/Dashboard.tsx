@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
-import { format, subDays } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 import type { Bet, DailyBreakdown, SummaryMetrics } from '../types';
-import { fetchSummary, fetchDailyBreakdown, fetchTransactions } from '../api/client';
+import {
+  fetchSummary,
+  fetchDailyBreakdown,
+  fetchTransactions,
+  fetchDataRange,
+} from '../api/client';
 import SummaryCards from './SummaryCards';
 import TransactionChart from './TransactionChart';
 import TransactionTable from './TransactionTable';
@@ -20,6 +25,26 @@ export default function Dashboard() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // On first load, snap the range to the latest 30 days that actually have data.
+  useEffect(() => {
+    let cancelled = false;
+    fetchDataRange()
+      .then((r) => {
+        if (cancelled || !r.maxDate) return;
+        const max = parseISO(r.maxDate);
+        const desiredStart = format(subDays(max, 30), ISO);
+        const min = r.minDate ?? desiredStart;
+        setStart(desiredStart < min ? min : desiredStart);
+        setEnd(r.maxDate);
+      })
+      .catch(() => {
+        /* fall back to the default last-30-days range */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

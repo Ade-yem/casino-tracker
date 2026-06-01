@@ -76,8 +76,10 @@ export interface DayData {
   };
 }
 
-export interface BankSummary {
+export interface TokenTotals {
   id: string;
+  symbol: string;
+  decimals: string;
   totalWagered: string;
   totalPayout: string;
   betCount: string;
@@ -146,25 +148,24 @@ export async function fetchAllBets(fromTs: number, toTs: number): Promise<RawBet
 }
 
 /**
- * Fetch pre-aggregated day data from GameToken entities.
- * Each GameToken has a dayData array; we query across all tokens.
- * NOTE: This uses a different approach than per-bet fetching — it queries the
- * GameToken entity's dayData, which pre-aggregates totalWagered/totalPayout.
+ * Fetch pre-aggregated per-day, per-game-token totals from GameTokenDayData.
+ * Cursor-paginated on `id` so multi-game/multi-token ranges aren't truncated
+ * at 1000 rows. `date` is stored as a unix day boundary (seconds).
  */
 export async function fetchDayData(fromTs: number, toTs: number): Promise<DayData[]> {
-  // Convert timestamps to day boundaries (The Graph stores day as unix day * 86400)
   const fromDay = Math.floor(fromTs / 86400) * 86400;
   const toDay = Math.floor(toTs / 86400) * 86400;
 
   const query = `
-    query DayData($from: Int!, $to: Int!) {
+    query DayData($lastId: ID!, $from: Int!, $to: Int!) {
       gameTokenDayDatas(
         first: ${PAGE_SIZE}
-        orderBy: date
+        orderBy: id
         orderDirection: asc
-        where: { date_gte: $from, date_lte: $to }
+        where: { id_gt: $lastId, date_gte: $from, date_lte: $to }
         subgraphError: allow
       ) {
+        id
         date
         totalWagered
         totalPayout
@@ -176,60 +177,85 @@ export async function fetchDayData(fromTs: number, toTs: number): Promise<DayDat
     }
   `;
 
-  // Try this entity; if field names differ we fall back in aggregator
-  try {
-    const data = await gql<{
-      gameTokenDayDatas: Array<{
-        date: string;
-        totalWagered: string;
-        totalPayout: string;
-        betCount: string;
-        gameToken: { token: { symbol: string; decimals: string } };
-      }>;
-    }>(query, { from: fromDay, to: toDay });
-
-    return (data.gameTokenDayDatas ?? []).map((d) => ({
-      date: d.date,
-      totalWagered: d.totalWagered,
-      totalPayout: d.totalPayout,
-      betCount: d.betCount,
-      token: d.gameToken.token,
-    }));
-  } catch {
-    // If gameTokenDayDatas doesn't exist or fields differ, return empty so
-    // aggregator falls back to per-bet aggregation.
-    return [];
+  interface Row {
+    id: string;
+    date: string;
+    totalWagered: string;
+    totalPayout: string;
+    betCount: string;
+    gameToken: { token: { symbol: string; decimals: string } };
   }
+
+  const all: DayData[] = [];
+  let lastId = '';
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await gql<{ gameTokenDayDatas: Row[] }>(query, {
+      lastId,
+      from: fromDay,
+      to: toDay,
+    });
+    const page = data.gameTokenDayDatas ?? [];
+    for (const d of page) {
+      all.push({
+        date: d.date,
+        totalWagered: d.totalWagered,
+        totalPayout: d.totalPayout,
+        betCount: d.betCount,
+        token: d.gameToken.token,
+      });
+    }
+    if (page.length < PAGE_SIZE) break;
+    lastId = page[page.length - 1].id;
+  }
+
+  return all;
 }
 
-/** Bank/Store cumulative summary for the Polygon deployment. */
-export async function fetchBankSummary(bankAddress: string): Promise<BankSummary | null> {
+/**
+ * All-time cumulative totals, per token.
+ *
+ * The subgraph's `Store` entity only tracks counts (betCount, userCount, ...),
+ * not financial totals. The authoritative all-time wagered/payout figures live
+ * on the `Token` entity, one row per token (USDC, USDT, BETS, ...). The caller
+ * sums across tokens, dividing each by its own decimals.
+ */
+export async function fetchTokenTotals(): Promise<TokenTotals[]> {
   const query = `
-    query Bank($id: ID!) {
-      casino(id: $id) {
+    query Tokens {
+      tokens(first: 1000) {
         id
+        symbol
+        decimals
         totalWagered
         totalPayout
         betCount
       }
     }
   `;
+  const data = await gql<{ tokens: TokenTotals[] }>(query);
+  return data.tokens ?? [];
+}
 
-  // The entity might be called 'casino', 'bank', or 'store' — try in order.
-  const entityNames = ['casino', 'bank', 'store'];
-  for (const entity of entityNames) {
-    try {
-      const q = query.replace('casino(id', `${entity}(id`).replace('casino {\n', `${entity} {\n`);
-      const data = await gql<Record<string, BankSummary | null>>(q, {
-        id: bankAddress.toLowerCase(),
-      });
-      const result = data[entity];
-      if (result) return result;
-    } catch {
-      continue;
+/**
+ * Earliest and latest day (UNIX seconds) present in GameTokenDayData.
+ * Lets the dashboard open on a window that actually has data instead of
+ * a hardcoded range. Returns null when the subgraph has no day data.
+ */
+export async function fetchDataDateRange(): Promise<{ minDate: number; maxDate: number } | null> {
+  const query = `
+    query Range {
+      first: gameTokenDayDatas(first: 1, orderBy: date, orderDirection: asc) { date }
+      last: gameTokenDayDatas(first: 1, orderBy: date, orderDirection: desc) { date }
     }
-  }
-  return null;
+  `;
+  const data = await gql<{
+    first: Array<{ date: string }>;
+    last: Array<{ date: string }>;
+  }>(query);
+  if (!data.first?.length || !data.last?.length) return null;
+  return { minDate: Number(data.first[0].date), maxDate: Number(data.last[0].date) };
 }
 
 /**

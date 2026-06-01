@@ -63,3 +63,12 @@ export async function triggerRefresh(): Promise<void> {
 export function csvExportUrl(startDate?: string, endDate?: string): string {
   return `${BASE}/export/csv${qs({ startDate, endDate })}`;
 }
+
+export interface DataRange {
+  minDate: string | null;
+  maxDate: string | null;
+}
+
+export function fetchDataRange(): Promise<DataRange> {
+  return getJson<DataRange>(`${BASE}/meta`);
+}
