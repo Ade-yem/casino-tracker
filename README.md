@@ -98,15 +98,19 @@ All endpoints served by the backend on port 3001.
 | Method | Endpoint | Params | Description |
 |--------|----------|--------|-------------|
 | GET | `/health` | — | Liveness check |
+| GET | `/api/meta` | — | Earliest/latest dates with data |
 | GET | `/api/summary` | `startDate`, `endDate`, `allTime` | Aggregated metrics |
 | GET | `/api/daily-breakdown` | `startDate`, `endDate` | Per-day inflow/outflow/net |
 | GET | `/api/transactions` | `startDate`, `endDate`, `limit`, `offset` | Paginated bet list |
 | POST | `/api/refresh` | — | Clear SQLite cache |
 | GET | `/api/export/csv` | `startDate`, `endDate` | Download all bets as CSV |
 
-Date params accept ISO strings (`2024-01-01`). Default range: last 30 days.
+Date params accept ISO strings (`2024-01-01`). Default range: last 30 days. The
+dashboard calls `/api/meta` on load and snaps its range to the most recent 30
+days that contain data, so it never opens on an empty window.
 
-Pass `?allTime=true` to `/api/summary` to use the Bank entity's cumulative totals (one query, instant).
+Pass `?allTime=true` to `/api/summary` for cumulative totals aggregated across
+all `Token` entities (one query).
 
 ---
 
@@ -127,6 +131,14 @@ BetSwirl's on-chain bets are indexed by The Graph into a unified `Bet` entity. E
 **Payout ratio** = Outflows ÷ Inflows
 
 Pending bets (`resolved: false`) are excluded from all metrics — only settled outcomes count.
+
+**Where the aggregates come from.** Summary and daily metrics are read from the
+subgraph's pre-aggregated `GameTokenDayData` entities (one row per game-token
+per day), so the dashboard never has to sum millions of individual bets. The
+`/api/transactions` and CSV endpoints fetch individual `Bet` rows for the
+selected range. Note the `Store` entity tracks only counts (bets, users) — the
+financial totals (`totalWagered`, `totalPayout`) live on `Token` and
+`GameToken`, each carrying its own `decimals`.
 
 ### Verifying a transaction
 

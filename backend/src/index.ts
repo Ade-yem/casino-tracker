@@ -8,6 +8,7 @@ import summaryRoute from './routes/summary';
 import dailyBreakdownRoute from './routes/dailyBreakdown';
 import refreshRoute from './routes/refresh';
 import exportCsvRoute from './routes/exportCsv';
+import metaRoute from './routes/meta';
 
 const app = express();
 app.use(cors());
@@ -15,6 +16,7 @@ app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+app.use('/api/meta', metaRoute);
 app.use('/api/transactions', transactionsRoute);
 app.use('/api/summary', summaryRoute);
 app.use('/api/daily-breakdown', dailyBreakdownRoute);
