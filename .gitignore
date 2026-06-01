@@ -6,3 +6,6 @@ dist/
 *.db-wal
 .DS_Store
 *.log
+backend/pnpm-workspace.yaml
+backend/pnpm-lock.yaml
+frontend/pnpm-lock.yaml
