@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { Bet } from '../types';
-import { formatUsd, shortHash, formatDate } from '../lib/format';
+import { formatUsd, shortHash, formatDate, explorerTxUrl } from '../lib/format';
 
 interface Props {
   bets: Bet[];
+  /** Hide game type filter + column for explorer-based casinos (all transfers show 'transfer'). */
+  hideGameType?: boolean;
 }
 
 type StatusFilter = 'All' | 'Win' | 'Loss' | 'Refunded';
@@ -15,7 +17,7 @@ function betStatus(b: Bet): string {
   return b.payout_usd > b.amount_usd ? 'Win' : b.payout_usd > 0 ? 'Partial' : 'Loss';
 }
 
-export default function TransactionTable({ bets }: Props) {
+export default function TransactionTable({ bets, hideGameType = false }: Props) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [gameFilter, setGameFilter] = useState<string>('All');
   const [page, setPage] = useState(0);
@@ -54,7 +56,7 @@ export default function TransactionTable({ bets }: Props) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Bets</h2>
+        <h2 className="text-lg font-semibold">{hideGameType ? 'Transfers' : 'Bets'}</h2>
         <div className="flex flex-wrap gap-2">
           <select
             className="rounded-md border border-slate-300 px-2 py-1 text-sm"
@@ -65,15 +67,17 @@ export default function TransactionTable({ bets }: Props) {
               <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
             ))}
           </select>
-          <select
-            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-            value={gameFilter}
-            onChange={(e) => { setGameFilter(e.target.value); setPage(0); }}
-          >
-            {gameTypes.map((g) => (
-              <option key={g} value={g}>{g === 'All' ? 'All games' : g}</option>
-            ))}
-          </select>
+          {!hideGameType && (
+            <select
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              value={gameFilter}
+              onChange={(e) => { setGameFilter(e.target.value); setPage(0); }}
+            >
+              {gameTypes.map((g) => (
+                <option key={g} value={g}>{g === 'All' ? 'All games' : g}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -86,12 +90,12 @@ export default function TransactionTable({ bets }: Props) {
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                 <tr>
                   <th className="py-2 pr-4">Date</th>
-                  <th className="py-2 pr-4">Roll Tx</th>
-                  <th className="py-2 pr-4">Game</th>
+                  <th className="py-2 pr-4">Tx Hash</th>
+                  {!hideGameType && <th className="py-2 pr-4">Game</th>}
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4">Token</th>
-                  <th className="py-2 pr-4 text-right">Bet</th>
-                  <th className="py-2 pr-4 text-right">Payout</th>
+                  <th className="py-2 pr-4 text-right">{hideGameType ? 'Inflow' : 'Bet'}</th>
+                  <th className="py-2 pr-4 text-right">{hideGameType ? 'Outflow' : 'Payout'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -101,20 +105,27 @@ export default function TransactionTable({ bets }: Props) {
                       {formatDate(b.timestamp)}
                     </td>
                     <td className="py-2 pr-4">
-                      {b.roll_tx_hash ? (
+                      {b.bet_tx_hash ? (
                         <a
                           className="text-blue-600 hover:underline"
-                          href={`https://polygonscan.com/tx/${b.roll_tx_hash}`}
+                          href={explorerTxUrl(b.chain, b.bet_tx_hash)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {shortHash(b.bet_tx_hash)}
+                        </a>
+                      ) : b.roll_tx_hash ? (
+                        <a
+                          className="text-blue-600 hover:underline"
+                          href={explorerTxUrl(b.chain, b.roll_tx_hash)}
                           target="_blank"
                           rel="noreferrer"
                         >
                           {shortHash(b.roll_tx_hash)}
                         </a>
-                      ) : (
-                        '—'
-                      )}
+                      ) : '—'}
                     </td>
-                    <td className="py-2 pr-4">{b.game_type}</td>
+                    {!hideGameType && <td className="py-2 pr-4">{b.game_type}</td>}
                     <td className="py-2 pr-4">{statusBadge(b)}</td>
                     <td className="py-2 pr-4">{b.token}</td>
                     <td className="py-2 pr-4 text-right font-medium">

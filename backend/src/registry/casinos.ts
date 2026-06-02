@@ -21,8 +21,10 @@ export interface CasinoChainConfig {
   houseAddresses?: string[];
   /** ERC-20 tokens to track for explorer-based casinos. */
   trackedTokens?: TrackedToken[];
-  /** Dune query IDs keyed by metric name. */
+  /** Dune query IDs keyed by metric name (e.g. 'daily' → query ID). */
   duneQueryIds?: Record<string, number>;
+  /** Override Dune column names for non-standard query schemas. */
+  duneColumnMap?: { date?: string; inflow_usd?: string; outflow_usd?: string; bet_count?: string };
 }
 
 export interface CasinoConfig {
@@ -129,7 +131,7 @@ export const CASINOS: Record<string, CasinoConfig> = {
       arbitrum: {
         sources: ['explorer'],
         houseAddresses: [
-          '0x47426195E4EdEf3E1bCB04e7c2c2e5736e04E79', // SportsAMM v2
+          '0xfb64e79a562f7250131cf528242ceb10fdc82395', // SportsAMMV2 Proxy (Arbiscan verified)
         ],
         trackedTokens: [
           { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
@@ -138,7 +140,7 @@ export const CASINOS: Record<string, CasinoConfig> = {
       base: {
         sources: ['explorer'],
         houseAddresses: [
-          '0xEd923be03CC3748A65bD24a27e1DF32F3b02B1fa', // SportsAMM base
+          '0xa1ead27ebbd90b8ef385f264cc66ba4c96767fdf', // SportsAMMV2 (Base, Codeslaw verified)
         ],
         trackedTokens: [
           { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
@@ -162,7 +164,7 @@ export const CASINOS: Record<string, CasinoConfig> = {
       arbitrum: {
         sources: ['explorer'],
         houseAddresses: [
-          '0x575f848D5d78F2b45AA63B1A88b23c2F68861C94', // WLP vault (house LP)
+          '0x9ee7109adc2f6514dea1f63bcca1340a320cca9a', // WLP vault (house LP, Arbiscan verified)
         ],
         trackedTokens: [
           { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC',   decimals: 6 },

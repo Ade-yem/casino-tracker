@@ -94,6 +94,11 @@ export default function Dashboard() {
 
   const currentEntry = catalog.find((e) => e.casinoId === casino && e.chainId === chain);
 
+  // Derive UI capabilities from the catalog entry's data sources
+  const isExplorerOnly = currentEntry?.sources.every((s) => s === 'explorer') ?? false;
+  const isDuneOnly = currentEntry?.sources.every((s) => s === 'dune') ?? false;
+  const hasNoBets = !loading && bets.length === 0 && daily.length === 0;
+
   return (
     <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -102,7 +107,11 @@ export default function Dashboard() {
             {currentEntry ? `${currentEntry.casinoName} on ${currentEntry.chainName}` : 'Casino Wallet Tracker'}
           </h1>
           <p className="text-sm text-slate-500">
-            On-chain cash-flow analytics via The Graph
+            {isExplorerOnly
+              ? 'House wallet flow analytics via block explorer'
+              : isDuneOnly
+                ? 'On-chain analytics via Dune'
+                : 'On-chain cash-flow analytics via The Graph'}
           </p>
         </div>
         <ExportButton start={start} end={end} casino={casino} chain={chain} />
@@ -128,9 +137,20 @@ export default function Dashboard() {
 
       {loading && <div className="text-sm text-slate-500">Loading…</div>}
 
-      {summary && <SummaryCards metrics={summary} />}
+      {hasNoBets && !error && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-slate-500">
+          <p className="font-medium">No data in this date range</p>
+          <p className="mt-1 text-sm">
+            {currentEntry?.note
+              ? currentEntry.note
+              : 'Try widening the date range or selecting a different casino.'}
+          </p>
+        </div>
+      )}
+
+      {summary && <SummaryCards metrics={summary} hidePayoutRatio={isExplorerOnly} />}
       <TransactionChart daily={daily} />
-      <TransactionTable bets={bets} />
+      {!isDuneOnly && <TransactionTable bets={bets} hideGameType={isExplorerOnly} />}
     </main>
   );
 }

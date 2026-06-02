@@ -3,6 +3,8 @@ import { formatUsd, formatPercent } from '../lib/format';
 
 interface Props {
   metrics: SummaryMetrics;
+  /** Hide the payout ratio card for explorer-based casinos (no game-level resolution data). */
+  hidePayoutRatio?: boolean;
 }
 
 interface CardProps {
@@ -22,10 +24,13 @@ function Card({ label, value, accent, sub }: CardProps) {
   );
 }
 
-export default function SummaryCards({ metrics }: Props) {
+export default function SummaryCards({ metrics, hidePayoutRatio = false }: Props) {
   const netPositive = metrics.netPosition >= 0;
+  const cols = hidePayoutRatio
+    ? 'grid-cols-1 sm:grid-cols-3'
+    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4';
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={`grid gap-4 ${cols}`}>
       <Card
         label="Total Inflows"
         value={formatUsd(metrics.totalInflows)}
@@ -44,12 +49,14 @@ export default function SummaryCards({ metrics }: Props) {
         accent={netPositive ? 'text-green-600' : 'text-red-600'}
         sub={netPositive ? 'House profit' : 'House loss'}
       />
-      <Card
-        label="Payout Ratio"
-        value={formatPercent(metrics.payoutRatio)}
-        accent="text-blue-600"
-        sub={`${metrics.txCount.toLocaleString()} resolved bets`}
-      />
+      {!hidePayoutRatio && (
+        <Card
+          label="Payout Ratio"
+          value={formatPercent(metrics.payoutRatio)}
+          accent="text-blue-600"
+          sub={`${metrics.txCount.toLocaleString()} resolved bets`}
+        />
+      )}
     </div>
   );
 }

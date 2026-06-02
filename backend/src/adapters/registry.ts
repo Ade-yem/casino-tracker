@@ -1,3 +1,4 @@
+import { DuneClient } from '@duneanalytics/client-sdk';
 import { CASINOS, getCasinoChain } from '../registry/casinos.js';
 import { CHAINS } from '../registry/chains.js';
 import { ExplorerClient } from '../sources/explorer.js';
@@ -6,9 +7,11 @@ import { BetSwirlSubgraphAdapter } from './betswirl/BetSwirlSubgraphAdapter.js';
 import { AzuroSubgraphAdapter } from './azuro/AzuroSubgraphAdapter.js';
 import { PolymarketSubgraphAdapter } from './polymarket/PolymarketSubgraphAdapter.js';
 import { GenericExplorerAdapter } from './generic/GenericExplorerAdapter.js';
+import { GenericDuneAdapter } from './generic/GenericDuneAdapter.js';
 
-const GRAPH_API_KEY    = process.env.GRAPH_API_KEY    ?? '';
+const GRAPH_API_KEY     = process.env.GRAPH_API_KEY     ?? '';
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY ?? '';
+const DUNE_API_KEY      = process.env.DUNE_API_KEY      ?? '';
 
 /**
  * Resolve a (casinoId, chainId) pair to a concrete CasinoAdapter.
@@ -59,6 +62,24 @@ export function resolveAdapter(casinoId: string, chainId: string): CasinoAdapter
         houseAddresses: chainCfg.houseAddresses,
         trackedTokens:  chainCfg.trackedTokens,
         explorerClient,
+      });
+    }
+
+    case 'GenericDune': {
+      const queryId = chainCfg.duneQueryIds?.['daily'];
+      if (!queryId) {
+        throw new Error(`${casinoId}/${chainId}: duneQueryIds.daily not configured`);
+      }
+      if (!DUNE_API_KEY) {
+        throw new Error(`${casinoId}/${chainId}: DUNE_API_KEY not configured`);
+      }
+      const duneClient = new DuneClient(DUNE_API_KEY);
+      return new GenericDuneAdapter({
+        casinoId,
+        chainId,
+        duneClient,
+        queryId,
+        columnMap: chainCfg.duneColumnMap,
       });
     }
 
