@@ -21,6 +21,7 @@ export interface CatalogEntry {
   chainId: string;
   chainName: string;
   sources: string[];
+  note: string | null;
 }
 
 export interface SummaryMetrics {

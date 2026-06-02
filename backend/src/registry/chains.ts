@@ -37,6 +37,14 @@ export const CHAINS: Record<string, ChainConfig> = {
     explorerApiUrl: 'https://api.etherscan.io/v2/api',
     explorerChainId: 42161,
   },
+  gnosis: {
+    id: 'gnosis',
+    chainId: 100,
+    name: 'Gnosis',
+    rpcUrl: process.env.RPC_GNOSIS ?? 'https://rpc.gnosischain.com',
+    explorerApiUrl: 'https://api.etherscan.io/v2/api',
+    explorerChainId: 100,
+  },
 };
 
 export function getChain(id: string): ChainConfig {
