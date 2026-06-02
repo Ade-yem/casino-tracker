@@ -1,14 +1,16 @@
 import { Router } from 'express';
-import { getDailyBreakdown } from '../services/aggregator';
-import { parseDateRange } from './util';
+import { parseDateRange, parseAdapter } from './util.js';
 
 const router = Router();
 
-/** GET /api/daily-breakdown?startDate=&endDate=  — per-day inflow/outflow/net. */
+/**
+ * GET /api/daily-breakdown?startDate=&endDate=&casino=betswirl&chain=polygon
+ */
 router.get('/', async (req, res, next) => {
   try {
+    const adapter = parseAdapter(req);
     const { fromTs, toTs } = parseDateRange(req);
-    res.json(await getDailyBreakdown(fromTs, toTs));
+    res.json(await adapter.getDailyBreakdown(fromTs, toTs));
   } catch (err) {
     next(err);
   }

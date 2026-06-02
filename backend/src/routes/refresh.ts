@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { clearCache } from '../services/sync';
+import { clearCache } from '../services/sync.js';
 
 const router = Router();
 

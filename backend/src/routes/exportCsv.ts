@@ -1,51 +1,47 @@
 import { Router } from 'express';
-import { getNormalizedBets } from '../services/sync';
-import { parseDateRange } from './util';
+import { parseDateRange, parseAdapter } from './util.js';
 
 const router = Router();
 
-/** Escape a CSV field per RFC 4180 (quote if it contains comma, quote, or newline). */
 function csvField(value: string | number | null): string {
   if (value === null || value === undefined) return '';
   const s = String(value);
-  if (/[",\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
-/** GET /api/export/csv?startDate=&endDate=  — stream all bets as CSV. */
+/**
+ * GET /api/export/csv?startDate=&endDate=&casino=betswirl&chain=polygon
+ */
 router.get('/', async (req, res, next) => {
   try {
+    const adapter = parseAdapter(req);
     const { fromTs, toTs } = parseDateRange(req);
-    const bets = await getNormalizedBets(fromTs, toTs);
+    const bets = await adapter.getBets(fromTs, toTs);
     bets.sort((a, b) => a.timestamp - b.timestamp);
 
-    const headers = [
-      'id',
-      'timestamp_utc',
-      'bettor',
-      'game_type',
-      'resolved',
-      'refunded',
-      'token',
-      'bet_amount',
-      'payout',
-      'roll_tx_hash',
-    ];
+    const casinoId = adapter.casinoId;
+    const chainId = adapter.chainId;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="betswirl-bets-${fromTs}-${toTs}.csv"`
+      `attachment; filename="${casinoId}-${chainId}-bets-${fromTs}-${toTs}.csv"`
     );
 
+    const headers = [
+      'id', 'timestamp_utc', 'bettor', 'casino', 'chain', 'game_type',
+      'resolved', 'refunded', 'token', 'bet_amount', 'payout', 'roll_tx_hash',
+    ];
     res.write(headers.join(',') + '\n');
+
     for (const b of bets) {
       const row = [
         csvField(b.id),
         csvField(new Date(b.timestamp * 1000).toISOString()),
         csvField(b.bettor),
+        csvField(b.casino),
+        csvField(b.chain),
         csvField(b.game_type),
         csvField(String(b.resolved)),
         csvField(String(b.refunded)),

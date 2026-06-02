@@ -2,6 +2,7 @@ import type {
   SummaryMetrics,
   DailyBreakdown,
   TransactionsResponse,
+  CatalogEntry,
 } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api';
@@ -30,19 +31,28 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface CasinoChainParams {
+  casino?: string;
+  chain?: string;
+}
+
 export function fetchSummary(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  cc?: CasinoChainParams
 ): Promise<SummaryMetrics> {
-  return getJson<SummaryMetrics>(`${BASE}/summary${qs({ startDate, endDate })}`);
+  return getJson<SummaryMetrics>(
+    `${BASE}/summary${qs({ startDate, endDate, ...cc })}`
+  );
 }
 
 export function fetchDailyBreakdown(
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  cc?: CasinoChainParams
 ): Promise<DailyBreakdown[]> {
   return getJson<DailyBreakdown[]>(
-    `${BASE}/daily-breakdown${qs({ startDate, endDate })}`
+    `${BASE}/daily-breakdown${qs({ startDate, endDate, ...cc })}`
   );
 }
 
@@ -51,6 +61,8 @@ export function fetchTransactions(params: {
   endDate?: string;
   limit?: number;
   offset?: number;
+  casino?: string;
+  chain?: string;
 }): Promise<TransactionsResponse> {
   return getJson<TransactionsResponse>(`${BASE}/transactions${qs(params)}`);
 }
@@ -60,8 +72,12 @@ export async function triggerRefresh(): Promise<void> {
   if (!res.ok) throw new Error(`Refresh failed (${res.status})`);
 }
 
-export function csvExportUrl(startDate?: string, endDate?: string): string {
-  return `${BASE}/export/csv${qs({ startDate, endDate })}`;
+export function csvExportUrl(
+  startDate?: string,
+  endDate?: string,
+  cc?: CasinoChainParams
+): string {
+  return `${BASE}/export/csv${qs({ startDate, endDate, ...cc })}`;
 }
 
 export interface DataRange {
@@ -69,6 +85,10 @@ export interface DataRange {
   maxDate: string | null;
 }
 
-export function fetchDataRange(): Promise<DataRange> {
-  return getJson<DataRange>(`${BASE}/meta`);
+export function fetchDataRange(cc?: CasinoChainParams): Promise<DataRange> {
+  return getJson<DataRange>(`${BASE}/meta${qs({ ...cc })}`);
+}
+
+export function fetchCatalog(): Promise<CatalogEntry[]> {
+  return getJson<CatalogEntry[]>(`${BASE}/catalog`);
 }

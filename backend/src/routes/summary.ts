@@ -1,22 +1,20 @@
 import { Router } from 'express';
-import { getSummary, getAllTimeSummary } from '../services/aggregator';
-import { parseDateRange } from './util';
+import { parseDateRange, parseAdapter } from './util.js';
 
 const router = Router();
 
 /**
- * GET /api/summary?startDate=&endDate=
- * Date-filtered summary derived from pre-aggregated daily data.
- * With ?allTime=true aggregates the Token entities for a cumulative view.
+ * GET /api/summary?startDate=&endDate=&allTime=true&casino=betswirl&chain=polygon
  */
 router.get('/', async (req, res, next) => {
   try {
+    const adapter = parseAdapter(req);
     if (req.query.allTime === 'true') {
-      res.json(await getAllTimeSummary());
+      res.json(await adapter.getAllTimeSummary());
       return;
     }
     const { fromTs, toTs } = parseDateRange(req);
-    res.json(await getSummary(fromTs, toTs));
+    res.json(await adapter.getSummary(fromTs, toTs));
   } catch (err) {
     next(err);
   }
