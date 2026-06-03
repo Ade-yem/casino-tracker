@@ -7,17 +7,25 @@
  * resolution is `resolved` (boolean, not a status enum).
  */
 import axios from 'axios';
-import { assertGraphConfigured, graphEndpoint } from '../config';
+import { assertGraphConfigured, config, graphEndpoint } from '../config';
 
+/**
+ * Execute a GraphQL query against the subgraph.
+ * @param query Graphql query
+ * @param variables Query variables
+ * @param chain Optionally specify "base" or "polygon" to target the respective subgraph; defaults to polygon.
+ * @returns 
+ */
 async function gql<T>(
   query: string,
-  variables: Record<string, unknown> = {}
+  variables: Record<string, unknown> = {},
+  chain?: "base" | "polygon"
 ): Promise<T> {
   assertGraphConfigured();
   const res = await axios.post(
-    graphEndpoint(),
+    graphEndpoint(chain),
     { query, variables },
-    { headers: { 'Content-Type': 'application/json' }, timeout: 30_000 }
+    { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.graphApiKey}` }, timeout: 30_000 }
   );
   if (res.data.errors) {
     throw new Error(res.data.errors.map((e: { message: string }) => e.message).join('; '));
@@ -108,7 +116,7 @@ const BET_FIELDS = `
 const PAGE_SIZE = 1000;
 
 /** Cursor-based pagination over all resolved bets in a timestamp range. */
-export async function fetchAllBets(fromTs: number, toTs: number): Promise<RawBet[]> {
+export async function fetchAllBets(fromTs: number, toTs: number, chain?: "base" | "polygon"): Promise<RawBet[]> {
   const query = `
     query Bets($lastId: ID!, $from: BigInt!, $to: BigInt!) {
       bets(
@@ -137,7 +145,7 @@ export async function fetchAllBets(fromTs: number, toTs: number): Promise<RawBet
       lastId,
       from: String(fromTs),
       to: String(toTs),
-    });
+    }, chain);
     const page = data.bets ?? [];
     all.push(...page);
     if (page.length < PAGE_SIZE) break;
@@ -261,11 +269,12 @@ export async function fetchDataDateRange(): Promise<{ minDate: number; maxDate: 
 /**
  * Introspection helper: discover which top-level query fields exist.
  * Used by the introspect script to validate field names at runtime.
+ * @param chain Optionally specify "base" or "polygon" to target the respective subgraph; defaults to polygon.
  */
-export async function introspectQueryType(): Promise<string[]> {
+export async function introspectQueryType(chain?: "base" | "polygon"): Promise<string[]> {
   const data = await gql<{
     __schema: { queryType: { fields: Array<{ name: string }> } };
-  }>(`{ __schema { queryType { fields { name } } } }`);
+  }>(`{ __schema { queryType { fields { name } } } }`, {}, chain);
   return data.__schema.queryType.fields.map((f) => f.name);
 }
 

@@ -15,12 +15,13 @@ export const config = {
   casinoStoreAddress:
     process.env.CASINO_STORE_ADDRESS ?? '0x8FB3110015FBCAA469ee45B64dcd2BdF544B9CFA',
   port: Number(process.env.PORT ?? 3001),
+  graphBaseUrl: process.env.GRAPH_BASE_URL ?? 'https://gateway.thegraph.com/api/subgraphs/id/6rt22DL9aaAjJHDUZ25sSsPuvuKxp1Tnf8LBXhL8WdZi',
   dbPath: process.env.DB_PATH ?? path.resolve(__dirname, '../cache.db'),
 };
 
 /** The Graph gateway endpoint for the BetSwirl Polygon subgraph. */
-export function graphEndpoint(): string {
-  return `https://gateway.thegraph.com/api/${config.graphApiKey}/deployments/id/${config.graphPolygonDeploymentId}`;
+export function graphEndpoint(chain?: "base" | "polygon"): string {
+  return chain === "base" ? config.graphBaseUrl : `https://gateway.thegraph.com/api/${config.graphApiKey}/deployments/id/${config.graphPolygonDeploymentId}`;
 }
 
 export function assertGraphConfigured(): void {

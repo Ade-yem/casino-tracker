@@ -5,7 +5,7 @@
  * Confirms actual entity names, field names, and discovers Bank/Store address.
  * Requires GRAPH_API_KEY in backend/.env.
  */
-import { rawGql, introspectQueryType, fetchAllBets } from '../api/graph';
+import { rawGql, introspectQueryType, fetchAllBets } from '../adapters/graph';
 
 interface FieldInfo {
   name: string;
@@ -20,7 +20,7 @@ function typeName(t: FieldInfo['type'] | null): string {
 
 async function main() {
   console.log('=== Top-level query fields ===');
-  const fields = await introspectQueryType();
+  const fields = await introspectQueryType("base");
   console.log(fields.join(', '));
 
   console.log('\n=== Schema for key entities ===');
@@ -34,7 +34,7 @@ async function main() {
         }
       }
     }
-  `);
+  `, {}, "base");
   for (const target of targets) {
     const t = schema.__schema.types.find(x => x.name === target);
     if (!t) { console.log(`\n### ${target}: NOT IN SCHEMA`); continue; }

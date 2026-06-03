@@ -1,4 +1,4 @@
-import { RawBet, fetchAllBets } from '../api/graph';
+import { RawBet, fetchAllBets } from '../adapters/graph';
 import { getDb } from '../db/client';
 
 export interface NormalizedBet {

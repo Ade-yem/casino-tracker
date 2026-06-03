@@ -1,4 +1,4 @@
-import { fetchDayData, fetchTokenTotals, DayData } from '../api/graph';
+import { fetchDayData, fetchTokenTotals, DayData } from '../adapters/graph';
 
 export interface SummaryMetrics {
   totalInflows: number;   // total wagered by players

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { fetchDataDateRange } from '../api/graph';
+import { fetchDataDateRange } from '../adapters/graph';
 
 const router = Router();
 
