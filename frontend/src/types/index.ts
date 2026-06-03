@@ -4,12 +4,24 @@ export interface Bet {
   amount_usd: number;
   payout_usd: number;
   token: string;
-  game_type: string;       // 'Dice' | 'CoinToss' | 'Roulette' | 'Keno' | 'Wheel' | 'Plinko'
+  game_type: string;
   resolved: boolean;
   refunded: boolean;
   bet_tx_hash: string;
   roll_tx_hash: string | null;
-  timestamp: number;       // UNIX seconds
+  timestamp: number;
+  casino: string;
+  chain: string;
+}
+
+export interface CatalogEntry {
+  casinoId: string;
+  casinoName: string;
+  casinoUrl: string;
+  chainId: string;
+  chainName: string;
+  sources: string[];
+  note: string | null;
 }
 
 export interface SummaryMetrics {

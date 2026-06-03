@@ -3,41 +3,29 @@ import { getDb } from '../db/client';
 
 export interface NormalizedBet {
   id: string;
-  bettor: string;          // player wallet address
-  amount_usd: number;      // total wagered (betAmount * betCount), human-readable
-  payout_usd: number;      // house outflow, human-readable (0 if lost)
-  token: string;           // e.g. 'USDC'
-  game_type: string;       // e.g. 'Dice', 'CoinToss'
+  bettor: string;
+  amount_usd: number;
+  payout_usd: number;
+  token: string;
+  game_type: string;
   resolved: boolean;
   refunded: boolean;
   bet_tx_hash: string;
   roll_tx_hash: string | null;
-  timestamp: number;       // betTimestamp (UNIX seconds)
+  timestamp: number;
 }
 
-/**
- * Convert a raw subgraph Bet into our normalized format.
- *
- * Amount: the total wagered per bet transaction = betAmount * betCount.
- * If totalBetAmount is present (set after roll resolution) we prefer it
- * because it's the authoritative on-chain value for multi-bet sessions.
- */
 export function normalizeBet(raw: RawBet): NormalizedBet {
   const decimals = Number(raw.gameToken.token.decimals);
   const divisor = 10 ** decimals;
-
-  // betAmount is per single roll; multiply by betCount for the full wager.
   const totalWagered = raw.totalBetAmount
     ? Number(raw.totalBetAmount) / divisor
     : (Number(raw.betAmount) * Number(raw.betCount)) / divisor;
-
-  const payout = raw.payout ? Number(raw.payout) / divisor : 0;
-
   return {
     id: raw.id,
     bettor: raw.user.id,
     amount_usd: totalWagered,
-    payout_usd: payout,
+    payout_usd: raw.payout ? Number(raw.payout) / divisor : 0,
     token: raw.gameToken.token.symbol,
     game_type: raw.gameId,
     resolved: raw.resolved,
@@ -48,16 +36,11 @@ export function normalizeBet(raw: RawBet): NormalizedBet {
   };
 }
 
-/** Fetch + normalize all resolved bets for a time range. */
-export async function getNormalizedBets(
-  fromTs: number,
-  toTs: number
-): Promise<NormalizedBet[]> {
+export async function getNormalizedBets(fromTs: number, toTs: number): Promise<NormalizedBet[]> {
   const raw = await fetchAllBets(fromTs, toTs);
   return raw.map(normalizeBet);
 }
 
-/** Write-through cache: upsert normalized bets into SQLite. */
 export function cacheBets(bets: NormalizedBet[]): void {
   if (bets.length === 0) return;
   const db = getDb();
@@ -84,7 +67,6 @@ export function cacheBets(bets: NormalizedBet[]): void {
     }
   });
   insertMany(bets);
-
   const maxTs = bets.reduce((m, b) => Math.max(m, b.timestamp), 0);
   db.prepare(
     `UPDATE sync_state SET last_timestamp = MAX(last_timestamp, ?), last_sync_time = ? WHERE id = 1`

@@ -1,11 +1,10 @@
 /**
  * Schema verification utility. Run with:
  *   cd backend && npx ts-node src/scripts/introspect.ts
- *
- * Confirms actual entity names, field names, and discovers Bank/Store address.
- * Requires GRAPH_API_KEY in backend/.env.
  */
-import { rawGql, introspectQueryType, fetchAllBets } from '../adapters/graph';
+import { introspectQueryType, fetchAllBets } from '../adapters/graph';
+import { makeGraphClient, betSwirlEndpoint } from '../sources/graphql.js';
+import { config, assertGraphConfigured } from '../config.js';
 
 interface FieldInfo {
   name: string;
@@ -19,13 +18,17 @@ function typeName(t: FieldInfo['type'] | null): string {
 }
 
 async function main() {
+  assertGraphConfigured();
+  const POLYGON_DEPLOYMENT_ID = process.env.GRAPH_POLYGON_DEPLOYMENT_ID ?? 'QmUa6b7voVS4kuERGo3bEDvRsW2FdTogSLeztnvtsi5DB2';
+  const gql = makeGraphClient(betSwirlEndpoint(config.graphApiKey, POLYGON_DEPLOYMENT_ID));
+
   console.log('=== Top-level query fields ===');
   const fields = await introspectQueryType("base");
   console.log(fields.join(', '));
 
   console.log('\n=== Schema for key entities ===');
   const targets = ['Bet', 'GameToken', 'GameTokenDayData', 'Token', 'Casino', 'Bank', 'Store'];
-  const schema = await rawGql<{ __schema: { types: TypeInfo[] } }>(`
+  const schema = await gql<{ __schema: { types: TypeInfo[] } }>(`
     {
       __schema {
         types {
@@ -34,7 +37,7 @@ async function main() {
         }
       }
     }
-  `, {}, "base");
+  `, {});
   for (const target of targets) {
     const t = schema.__schema.types.find(x => x.name === target);
     if (!t) { console.log(`\n### ${target}: NOT IN SCHEMA`); continue; }
@@ -49,8 +52,7 @@ async function main() {
   const bets = await fetchAllBets(now - 86400, now);
   console.log(`Fetched ${bets.length} resolved bets in the last 24 hours`);
   if (bets.length > 0) {
-    const b = bets[0];
-    console.log('First bet:', JSON.stringify(b, null, 2));
+    console.log('First bet:', JSON.stringify(bets[0], null, 2));
   }
 }
 

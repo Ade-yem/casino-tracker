@@ -1,13 +1,13 @@
 /**
- * The Graph query client for the BetSwirl Polygon subgraph.
+ * Backward-compatible re-exports for the legacy route/service files.
+ * All real logic now lives in adapters/betswirl/BetSwirlSubgraphAdapter.ts
+ * and sources/graphql.ts.
  *
- * Schema confirmed from BetSwirl SDK source (@betswirl/sdk-core).
- * All bets live in a single `Bet` entity (not separate diceBets/coinTossBets).
- * Player address is `user { address: id }`, timestamp is `betTimestamp`,
- * resolution is `resolved` (boolean, not a status enum).
+ * New code should call resolveAdapter(casinoId, chainId) instead.
  */
 import axios from 'axios';
 import { assertGraphConfigured, config, graphEndpoint } from '../config';
+import { makeGraphClient, betSwirlEndpoint } from '../sources/graphql.js';
 
 /**
  * Execute a GraphQL query against the subgraph.
@@ -33,55 +33,47 @@ async function gql<T>(
   return res.data.data as T;
 }
 
-// gameId values as used in the subgraph (confirmed from SDK xe/Ee maps)
-export const GAME_IDS = [
-  'CoinToss',
-  'Dice',
-  'Roulette',
-  'Keno',
-  'Wheel',
-  'Plinko',
-] as const;
+// Polygon deployment ID (kept for the legacy introspect script)
+const POLYGON_DEPLOYMENT_ID =
+  process.env.GRAPH_POLYGON_DEPLOYMENT_ID ??
+  'QmUa6b7voVS4kuERGo3bEDvRsW2FdTogSLeztnvtsi5DB2';
 
+function getGql() {
+  assertGraphConfigured();
+  return makeGraphClient(betSwirlEndpoint(config.graphApiKey, POLYGON_DEPLOYMENT_ID));
+}
+
+export const GAME_IDS = [
+  'CoinToss', 'Dice', 'Roulette', 'Keno', 'Wheel', 'Plinko',
+] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
-/** Raw bet as returned by the subgraph (before normalization). */
 export interface RawBet {
   id: string;
   gameId: GameId;
-  betAmount: string;       // amount per single bet (raw token units)
-  betCount: string;        // number of bets in the transaction
-  betTimestamp: string;    // UNIX seconds
+  betAmount: string;
+  betCount: string;
+  betTimestamp: string;
   betTxnHash: string;
   rollTxnHash: string | null;
   rollTimestamp: string | null;
-  // totalBetAmount aliased as rollTotalBetAmount in the SDK;
-  // it is the resolved total wagered (may differ from betAmount*betCount for multi-bets)
   totalBetAmount: string | null;
-  payout: string | null;   // what the house returned; null if pending
+  payout: string | null;
   resolved: boolean;
   refunded: boolean;
-  user: { id: string };    // player wallet address (id = lowercased address)
+  user: { id: string };
   gameToken: {
     id: string;
-    token: {
-      id: string;          // token contract address
-      symbol: string;
-      decimals: string;
-    };
+    token: { id: string; symbol: string; decimals: string };
   };
 }
 
-/** Pre-aggregated per-day data from the GameToken entity's dayData. */
 export interface DayData {
-  date: string;            // UNIX day timestamp (start of day UTC)
-  totalWagered: string;    // sum of all bet amounts that day (raw units)
-  totalPayout: string;     // sum of all payouts that day (raw units)
+  date: string;
+  totalWagered: string;
+  totalPayout: string;
   betCount: string;
-  token: {
-    symbol: string;
-    decimals: string;
-  };
+  token: { symbol: string; decimals: string };
 }
 
 export interface TokenTotals {
@@ -94,23 +86,10 @@ export interface TokenTotals {
 }
 
 const BET_FIELDS = `
-  id
-  gameId
-  betAmount
-  betCount
-  betTimestamp
-  betTxnHash
-  rollTxnHash
-  rollTimestamp
-  totalBetAmount
-  payout
-  resolved
-  refunded
+  id gameId betAmount betCount betTimestamp betTxnHash
+  rollTxnHash rollTimestamp totalBetAmount payout resolved refunded
   user { id }
-  gameToken {
-    id
-    token { id symbol decimals }
-  }
+  gameToken { id token { id symbol decimals } }
 `;
 
 const PAGE_SIZE = 1000;
@@ -120,26 +99,14 @@ export async function fetchAllBets(fromTs: number, toTs: number, chain?: "base" 
   const query = `
     query Bets($lastId: ID!, $from: BigInt!, $to: BigInt!) {
       bets(
-        first: ${PAGE_SIZE}
-        orderBy: id
-        orderDirection: asc
-        where: {
-          id_gt: $lastId
-          betTimestamp_gte: $from
-          betTimestamp_lte: $to
-          resolved: true
-        }
+        first: ${PAGE_SIZE} orderBy: id orderDirection: asc
+        where: { id_gt: $lastId betTimestamp_gte: $from betTimestamp_lte: $to resolved: true }
         subgraphError: allow
-      ) {
-        ${BET_FIELDS}
-      }
+      ) { ${BET_FIELDS} }
     }
   `;
-
   const all: RawBet[] = [];
   let lastId = '';
-
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const data = await gql<{ bets: RawBet[] }>(query, {
       lastId,
@@ -151,117 +118,54 @@ export async function fetchAllBets(fromTs: number, toTs: number, chain?: "base" 
     if (page.length < PAGE_SIZE) break;
     lastId = page[page.length - 1].id;
   }
-
   return all;
 }
 
-/**
- * Fetch pre-aggregated per-day, per-game-token totals from GameTokenDayData.
- * Cursor-paginated on `id` so multi-game/multi-token ranges aren't truncated
- * at 1000 rows. `date` is stored as a unix day boundary (seconds).
- */
 export async function fetchDayData(fromTs: number, toTs: number): Promise<DayData[]> {
+  const gql = getGql();
   const fromDay = Math.floor(fromTs / 86400) * 86400;
   const toDay = Math.floor(toTs / 86400) * 86400;
-
   const query = `
     query DayData($lastId: ID!, $from: Int!, $to: Int!) {
       gameTokenDayDatas(
-        first: ${PAGE_SIZE}
-        orderBy: id
-        orderDirection: asc
-        where: { id_gt: $lastId, date_gte: $from, date_lte: $to }
+        first: ${PAGE_SIZE} orderBy: id orderDirection: asc
+        where: { id_gt: $lastId date_gte: $from date_lte: $to }
         subgraphError: allow
-      ) {
-        id
-        date
-        totalWagered
-        totalPayout
-        betCount
-        gameToken {
-          token { symbol decimals }
-        }
-      }
+      ) { id date totalWagered totalPayout betCount gameToken { token { symbol decimals } } }
     }
   `;
-
   interface Row {
-    id: string;
-    date: string;
-    totalWagered: string;
-    totalPayout: string;
-    betCount: string;
-    gameToken: { token: { symbol: string; decimals: string } };
+    id: string; date: string; totalWagered: string; totalPayout: string;
+    betCount: string; gameToken: { token: { symbol: string; decimals: string } };
   }
-
   const all: DayData[] = [];
   let lastId = '';
-
-  // eslint-disable-next-line no-constant-condition
   while (true) {
-    const data = await gql<{ gameTokenDayDatas: Row[] }>(query, {
-      lastId,
-      from: fromDay,
-      to: toDay,
-    });
+    const data = await gql<{ gameTokenDayDatas: Row[] }>(query, { lastId, from: fromDay, to: toDay });
     const page = data.gameTokenDayDatas ?? [];
-    for (const d of page) {
-      all.push({
-        date: d.date,
-        totalWagered: d.totalWagered,
-        totalPayout: d.totalPayout,
-        betCount: d.betCount,
-        token: d.gameToken.token,
-      });
-    }
+    for (const d of page) all.push({ date: d.date, totalWagered: d.totalWagered, totalPayout: d.totalPayout, betCount: d.betCount, token: d.gameToken.token });
     if (page.length < PAGE_SIZE) break;
     lastId = page[page.length - 1].id;
   }
-
   return all;
 }
 
-/**
- * All-time cumulative totals, per token.
- *
- * The subgraph's `Store` entity only tracks counts (betCount, userCount, ...),
- * not financial totals. The authoritative all-time wagered/payout figures live
- * on the `Token` entity, one row per token (USDC, USDT, BETS, ...). The caller
- * sums across tokens, dividing each by its own decimals.
- */
 export async function fetchTokenTotals(): Promise<TokenTotals[]> {
-  const query = `
-    query Tokens {
-      tokens(first: 1000) {
-        id
-        symbol
-        decimals
-        totalWagered
-        totalPayout
-        betCount
-      }
-    }
-  `;
+  const gql = getGql();
+  const query = `query Tokens { tokens(first: 1000) { id symbol decimals totalWagered totalPayout betCount } }`;
   const data = await gql<{ tokens: TokenTotals[] }>(query);
   return data.tokens ?? [];
 }
 
-/**
- * Earliest and latest day (UNIX seconds) present in GameTokenDayData.
- * Lets the dashboard open on a window that actually has data instead of
- * a hardcoded range. Returns null when the subgraph has no day data.
- */
 export async function fetchDataDateRange(): Promise<{ minDate: number; maxDate: number } | null> {
+  const gql = getGql();
   const query = `
     query Range {
       first: gameTokenDayDatas(first: 1, orderBy: date, orderDirection: asc) { date }
       last: gameTokenDayDatas(first: 1, orderBy: date, orderDirection: desc) { date }
     }
   `;
-  const data = await gql<{
-    first: Array<{ date: string }>;
-    last: Array<{ date: string }>;
-  }>(query);
+  const data = await gql<{ first: Array<{ date: string }>; last: Array<{ date: string }> }>(query);
   if (!data.first?.length || !data.last?.length) return null;
   return { minDate: Number(data.first[0].date), maxDate: Number(data.last[0].date) };
 }
@@ -277,8 +181,3 @@ export async function introspectQueryType(chain?: "base" | "polygon"): Promise<s
   }>(`{ __schema { queryType { fields { name } } } }`, {}, chain);
   return data.__schema.queryType.fields.map((f) => f.name);
 }
-
-/**
- * Run a raw GraphQL query — used by the introspect script to explore schema.
- */
-export { gql as rawGql };

@@ -1,16 +1,17 @@
 import { Router } from 'express';
-import { fetchDataDateRange } from '../adapters/graph';
+import { parseAdapter } from './util.js';
 
 const router = Router();
 
 /**
- * GET /api/meta
- * Returns the date span (ISO strings) of data available in the subgraph, so the
- * frontend can default its range to a window that actually contains data.
+ * GET /api/meta?casino=betswirl&chain=polygon
+ * Returns the date span (ISO strings) of data available for the selected
+ * casino+chain, so the frontend can default its range to real data.
  */
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    const range = await fetchDataDateRange();
+    const adapter = parseAdapter(req);
+    const range = await adapter.getDateRange();
     if (!range) {
       res.json({ minDate: null, maxDate: null });
       return;
