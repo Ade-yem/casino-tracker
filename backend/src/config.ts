@@ -3,12 +3,22 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+
+const POLYGON_DEPLOYMENT_ID =
+  process.env.GRAPH_POLYGON_DEPLOYMENT_ID ??
+  'QmUa6b7voVS4kuERGo3bEDvRsW2FdTogSLeztnvtsi5DB2';
+
+  
 export const config = {
   graphApiKey: process.env.GRAPH_API_KEY ?? '',
   duneApiKey: process.env.DUNE_API_KEY ?? '',
   port: Number(process.env.PORT ?? 3001),
   graphBaseUrl: process.env.GRAPH_BASE_URL ?? 'https://gateway.thegraph.com/api/subgraphs/id/6rt22DL9aaAjJHDUZ25sSsPuvuKxp1Tnf8LBXhL8WdZi',
   dbPath: process.env.DB_PATH ?? path.resolve(__dirname, '../cache.db'),
+  graphPolygonDeploymentId: POLYGON_DEPLOYMENT_ID,
+  // BetSwirl Bank contract on Polygon (confirmed from BetSwirl SDK)
+  casinoStoreAddress:
+    process.env.CASINO_STORE_ADDRESS ?? '0x8FB3110015FBCAA469ee45B64dcd2BdF544B9CFA',
 };
 
 /** The Graph gateway endpoint for the BetSwirl Polygon subgraph. */
